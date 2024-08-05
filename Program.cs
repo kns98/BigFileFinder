@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -25,25 +25,29 @@ class FatFileFinder
     {
         try
         {
-            var file = FindLargeFile(DirectoryPath);
-            if (file != null)
+            var largeFiles = FindLargeFiles(DirectoryPath).ToList();
+            if (largeFiles.Count > 0)
             {
-                Console.WriteLine($"File found: {file.FullName} - {file.Length} bytes");
+                Console.WriteLine("Files found:");
+                foreach (var file in largeFiles)
+                {
+                    Console.WriteLine($"{file.FullName} - {file.Length} bytes");
+                }
 
-                Console.WriteLine("Do you want to compress this file into a ZIP archive? (y/n)");
+                Console.WriteLine("Do you want to compress these files into a ZIP archive? (y/n)");
                 if (Console.ReadLine().Trim().ToLower() == "y")
                 {
                     Console.WriteLine("Enter the output ZIP file path:");
                     string zipPath = Console.ReadLine();
-                    CompressFile(file, zipPath);
-                    Console.WriteLine("File compressed successfully.");
+                    CompressFiles(largeFiles, zipPath);
+                    Console.WriteLine("Files compressed successfully.");
                 }
 
-                Console.WriteLine("Do you want to move this file to a temporary directory? (y/n)");
+                Console.WriteLine("Do you want to move these files to a temporary directory? (y/n)");
                 if (Console.ReadLine().Trim().ToLower() == "y")
                 {
-                    MoveFileToTemp(file);
-                    Console.WriteLine("File moved successfully.");
+                    MoveFilesToTemp(largeFiles);
+                    Console.WriteLine("Files moved successfully.");
                 }
             }
             else
@@ -57,8 +61,10 @@ class FatFileFinder
         }
     }
 
-    private FileInfo FindLargeFile(string currentDirectory)
+    private IEnumerable<FileInfo> FindLargeFiles(string currentDirectory)
     {
+        List<FileInfo> largeFiles = new List<FileInfo>();
+
         try
         {
             foreach (var file in Directory.GetFiles(currentDirectory))
@@ -70,7 +76,7 @@ class FatFileFinder
                         fileInfo.Length > MinSize &&
                         (FileExtensions.Length == 0 || FileExtensions.Contains(fileInfo.Extension)))
                     {
-                        return fileInfo;
+                        largeFiles.Add(fileInfo);
                     }
                 }
                 catch (Exception ex)
@@ -81,11 +87,7 @@ class FatFileFinder
 
             foreach (var directory in Directory.GetDirectories(currentDirectory))
             {
-                var result = FindLargeFile(directory);
-                if (result != null)
-                {
-                    return result;
-                }
+                largeFiles.AddRange(FindLargeFiles(directory));
             }
         }
         catch (Exception ex)
@@ -93,68 +95,55 @@ class FatFileFinder
             Console.Error.WriteLine($"Error accessing directory '{currentDirectory}': {ex.Message}\n{ex.StackTrace}");
         }
 
-        return null;
+        return largeFiles;
     }
 
-    private void CompressFile(FileInfo file, string zipPath)
+    private void CompressFiles(IEnumerable<FileInfo> files, string zipPath)
     {
         try
         {
             using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
             {
-                zip.CreateEntryFromFile(file.FullName, file.Name, CompressionLevel.Optimal);
+                foreach (var file in files)
+                {
+                    zip.CreateEntryFromFile(file.FullName, file.Name, CompressionLevel.Optimal);
+                }
             }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error compressing file '{file.FullName}': {ex.Message}\n{ex.StackTrace}");
+            Console.Error.WriteLine($"Error compressing files: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
-    private void MoveFileToTemp(FileInfo file)
+    private void MoveFilesToTemp(IEnumerable<FileInfo> files)
     {
         try
         {
             string tempDirectory = Path.Combine(Path.GetTempPath(), "FatFileFinder");
             Directory.CreateDirectory(tempDirectory);
 
-            string destFile = Path.Combine(tempDirectory, file.Name);
-            File.Move(file.FullName, destFile);
-            Console.WriteLine($"Moved: {file.FullName} to {destFile}");
+            foreach (var file in files)
+            {
+                string destFile = Path.Combine(tempDirectory, file.Name);
+                File.Move(file.FullName, destFile);
+                Console.WriteLine($"Moved: {file.FullName} to {destFile}");
+            }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error moving file '{file.FullName}': {ex.Message}\n{ex.StackTrace}");
+            Console.Error.WriteLine($"Error moving files: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
     public static long ParseSize(string sizeInput)
     {
-        sizeInput = sizeInput.ToUpper().Trim();
-        long multiplier = 1;
-
-        if (sizeInput.EndsWith("KB"))
-        {
-            multiplier = 1024;
-            sizeInput = sizeInput.Substring(0, sizeInput.Length - 2);
-        }
-        else if (sizeInput.EndsWith("MB"))
-        {
-            multiplier = 1024 * 1024;
-            sizeInput = sizeInput.Substring(0, sizeInput.Length - 2);
-        }
-        else if (sizeInput.EndsWith("GB"))
-        {
-            multiplier = 1024 * 1024 * 1024;
-            sizeInput = sizeInput.Substring(0, sizeInput.Length - 2);
-        }
-
         if (long.TryParse(sizeInput, out long size))
         {
-            return size * multiplier;
+            return size;
         }
 
-        throw new ArgumentException("Invalid size format.");
+        throw new ArgumentException("Invalid size format. Please provide the size in bytes.");
     }
 }
 
@@ -165,7 +154,7 @@ class Program
         [Option('d', "directory", Required = true, HelpText = "The directory to search for files.")]
         public string Directory { get; set; }
 
-        [Option('s', "size", Required = true, HelpText = "The minimum file size (e.g., 10MB).")]
+        [Option('s', "size", Required = true, HelpText = "The minimum file size in bytes.")]
         public string Size { get; set; }
 
         [Option('e', "extensions", Default = "", HelpText = "Comma-separated list of file extensions to filter by (or leave blank for all).")]
